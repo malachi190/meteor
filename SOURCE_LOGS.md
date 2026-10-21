@@ -66,3 +66,57 @@ This file records each implementation increment, the files changed, and what the
 - `internal/logging/logging.go`: migrates the former undated log to the date from its modification time, appending its contents when that dated file already exists.
 - Design choice: calendar dates in the filenames make retention predictable and easy to inspect; file timestamps alone can change when files are copied or restored. The retention policy keeps three dates inclusive.
 - Existing `ERROR_LOG_PATH=logs/meteor-errors.log` remains the base path; the running logger derives dated filenames from it.
+
+## 2026-10-16 — sqlc query generation foundation
+
+- `sqlc.yaml`: configures sqlc to read the existing Goose migrations and hand-written queries, then generate a pgx/v5 package under `internal/database/queries`.
+- `Makefile`: adds a generation command that runs pinned sqlc version v1.31.1 without adding the generator to Meteor's runtime dependencies.
+- `db/queries/projects.sql`: defines project create, tenant-scoped list, and tenant-plus-project lookup queries. Each read query includes an explicit tenant filter as an application-level scope alongside PostgreSQL RLS.
+- `internal/database/queries/`: contains generated pgx/v5 models, query methods, and a Querier interface. Regenerate these files from the SQL and config; do not edit them by hand.
+- `internal/database/project_repository.go`: converts the trusted context tenant ID to pgx's UUID type, runs create/list/get project operations through `WithTenant`, and passes the tenant ID explicitly to the generated queries.
+- Design choice: sqlc generates typed Go wrappers while keeping SQL visible for review; an ORM would instead add a separate mapping and query abstraction that we do not need for this SQL-first project.
+- Limitation: tenant creation, dashboard user tables, signup transactions, and the service layer are still pending. Authentication will supply the trusted tenant context in Phase 3.
+
+## 2026-10-16 — Repository package and tenant activity fields
+
+- `internal/repository/health_repository.go` and `internal/repository/project_repository.go`: move repository implementations out of the database infrastructure package into a dedicated repository package. The project repository still uses database transaction helpers and generated sqlc queries.
+- `cmd/api/main.go`: update composition-root wiring to construct the health repository from its new package.
+- `migrations/00003_add_tenant_status_and_last_login.sql`: add a constrained `active`/`inactive` status with an `active` default and a nullable `last_login_at` timestamp; the down migration removes both fields.
+- `internal/database/queries/models.go`: regenerated tenant model includes the new status and last-login fields.
+- Design choice: `last_login_at` is nullable to represent tenants that have not logged in yet. The schema records the information; authentication and any inactivity policy will update/use it later.
+
+## 2026-10-16 — Tenant creation under RLS
+
+- `db/queries/tenants.sql`: adds a typed insert query that returns the tenant's ID, name, status, last-login timestamp, and creation timestamp.
+- `internal/repository/tenant_repository.go`: creates a random UUID v4 in Go, attaches that actual ID to the request context, and calls the generated insert query inside `WithTenant`. The same ID is therefore used for the transaction-local RLS setting and the permanent tenant row.
+- Design choice: the application generates the UUID before the insert because RLS `WITH CHECK` must compare the new row ID with `app.tenant_id`. A placeholder ID would not be saved and would not satisfy that invariant.
+- Limitation: this repository method is not exposed through an API or signup service yet; it only defines the database operation for that later flow.
+
+## 2026-10-16 — Dashboard authentication schema and typed queries
+
+- `migrations/00004_create_dashboard_auth.sql`: adds tenant-owned dashboard users, GitHub identities, hashed opaque browser sessions, and hashed one-time email-verification tokens. Every tenant-owned auth table uses forced RLS with both read and write policies tied to `app.tenant_id`; composite foreign keys keep each identity/session/token attached to a user in the same tenant.
+- `db/queries/dashboard_users.sql`, `user_identities.sql`, and `email_verification_tokens.sql`: define the auth SQL operations sqlc exposes as typed Go methods. Queries include explicit tenant filters in addition to relying on RLS.
+- Design choice: store only SHA-256 hashes of high-entropy random session and verification tokens, so a database read does not reveal reusable bearer secrets. Password hashing and verification behavior will be implemented in the auth service, not SQL.
+- Validation: local `sqlc generate` succeeded, `GOCACHE=/tmp/meteor-go-cache go build ./...` succeeded, and Goose applied migrations 4 and 5 to the local database.
+
+## 2026-10-19 — Redis-backed dashboard sessions
+
+- Dashboard sessions now live in Redis, keyed by tenant and user. Login, email verification, and GitHub sign-in replace the user's prior session; authenticated requests resolve the cached account and role without a PostgreSQL session query.
+- Session entries expire after 48 hours of inactivity and renew after 24 hours. Logout and password reset invalidate the Redis entry.
+- Migration `00008_move_dashboard_sessions_to_redis.sql` removes the PostgreSQL `dashboard_sessions` table and its session lookup function.
+
+## 2026-10-16 — Restricted pre-auth lookup functions
+
+- `migrations/00005_create_auth_lookup_functions.sql`: creates `meteor_auth_lookup`, a non-login, read-only role with `BYPASSRLS`, and four `SECURITY DEFINER` functions in a private schema. The functions resolve a password login, GitHub identity, active session, or unconsumed verification token to only the tenant and user identifiers needed to establish trusted context (plus the password hash and verification timestamp for login).
+- `db/queries/auth_lookup.sql`: calls those functions through sqlc queries. Explicit casts preserve generated pgx UUID, text, and timestamp types even though sqlc cannot infer a table function's output columns on its own.
+- Security boundary: `meteor_app` receives `EXECUTE` only on these functions, no membership in the lookup role, and no direct `SELECT` on auth tables. Functions use fixed `pg_catalog, pg_temp` search paths and fully qualified table names. All subsequent tenant data reads/writes still use `WithTenant` and forced RLS.
+- Limitation: pre-auth lookup functions can reveal whether a login email or token exists to the API process, so auth endpoints must return generic errors and apply rate limits. The lookup role's bypass is intentionally limited to read-only functions and requires careful review if those functions change.
+- Validation: `sqlc generate`, `GOCACHE=/tmp/meteor-go-cache go build ./...`, and local Goose migration application to version 5 succeeded.
+
+## 2026-10-21 — Authentication and connection test foundation
+
+- `internal/auth/service_test.go`: exercises signup input validation and password hashing, verified-login gating, session creation, malformed session rejection, and password-reset session revocation with test doubles for external boundaries.
+- `internal/auth/redis_sessions_test.go`: optionally connects to a real Redis instance through `TEST_REDIS_URL`, then checks ping, session creation, resolution, invalid-token rejection, and revocation.
+- `internal/database/pool_test.go`: checks malformed database URL rejection and optionally verifies a live PostgreSQL connection through `TEST_DATABASE_URL`.
+- `internal/database/tenant_test.go`: verifies tenant database work fails closed when tenant context is missing, rejects a missing transaction callback, and optionally checks the transaction-local RLS setting against live PostgreSQL.
+- Live-service checks skip when their `TEST_*_URL` variable is unset, so the default unit suite does not require Docker. No GitHub OAuth network flow is covered; it is reserved for frontend integration testing.

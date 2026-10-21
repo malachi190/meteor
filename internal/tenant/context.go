@@ -5,6 +5,7 @@ import "context"
 // ID identifies a tenant in the authenticated request context.
 type ID string
 
+// contextKey prevents tenant scope values from colliding with keys owned by other packages.
 type contextKey struct{}
 
 // WithID stores a tenant ID in a context for trusted application code to use.

@@ -35,24 +35,30 @@ This is the milestone checklist for building Meteor from the agreed spec. We upd
 
 ## Phase 2 — SQL query layer and tenant onboarding
 
-**Status: Not started**
+**Status: In progress**
 
-- [ ] Set up sqlc and keep hand-written SQL queries alongside generated Go query code.
-- [ ] Build the initial tenant and project data operations on top of the tenant transaction helper.
-- [ ] Design signup so it creates the tenant and first dashboard user atomically.
-- [ ] Add database constraints and migrations for dashboard users, identities, and sessions.
+- [x] Set up sqlc and keep hand-written SQL queries alongside generated Go query code.
+- [x] Add a constrained tenant status and nullable last-login timestamp through a new migration.
+- [x] Build project create/list/get operations on top of the tenant transaction helper.
+- [x] Add tenant creation with an initial tenant ID that can be set as the RLS context.
+- [x] Design signup so it creates the tenant and first dashboard user atomically.
+- [x] Apply and verify the auth schema migration for dashboard users, GitHub identities, dashboard sessions, and one-time email verification tokens.
+- [x] Implement constrained pre-auth lookup functions for login, GitHub identity, session, and email verification resolution.
 
-**Goal achieved when:** tenant signup data can be written and queried through typed SQL code without bypassing RLS or relying on ORM behavior.
+**Goal achieved when:** tenant signup writes run under RLS and auth lookups before tenant resolution use only the restricted database functions, with typed SQL code and no ORM dependency.
 
 ## Phase 3 — Dashboard authentication
 
-**Status: Not started**
+**Status: In progress**
 
-- [ ] Implement email/password signup and login with a password hashing scheme.
-- [ ] Implement secure session creation, renewal, logout, and account recovery decisions.
-- [ ] Add GitHub OAuth with state validation and verified-email checks.
-- [ ] Link GitHub login to an existing account only when its verified email matches the normalized account email.
-- [ ] Attach the authenticated tenant ID to each dashboard request context.
+- [x] Implement email/password signup with required email verification and Argon2id password hashing.
+- [x] Implement secure session creation, renewal, and logout.
+- [x] Add GitHub OAuth with state validation and verified primary-email checks.
+- [x] Link GitHub login to an existing account only when its verified email matches the normalized account email.
+- [x] Attach the authenticated tenant ID to dashboard request context through session middleware.
+- [x] Add basic per-process IP rate limits for signup, login, verification, and OAuth endpoints.
+- [x] Add one-time password reset links (one-hour expiry), with tenant-scoped atomic password update and revocation of all active sessions.
+- [ ] Replace per-process limits with shared Redis limits before running multiple API instances.
 
 **Goal achieved when:** signup, login, logout, and GitHub sign-in resolve a verified dashboard identity and tenant scope without accepting tenant identity from an untrusted request field.
 

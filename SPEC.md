@@ -157,7 +157,15 @@ Tenant (company)
 
 ### 5.3 Authentication
 
-- **Dashboard users:** self-serve tenant signup and email/password authentication, with GitHub OAuth as an additional sign-in option. Automatically link GitHub sign-in to an existing account only when GitHub provides a verified email matching the account's normalized email. Store the provider's stable user ID, not its mutable username. Account recovery and unlinking details remain to be specified.
+- **Dashboard users:** self-serve tenant signup and email/password authentication, with GitHub OAuth as an additional sign-in option. Password signups remain pending until the user verifies their email. Automatically link GitHub sign-in to an existing account only when GitHub provides a verified primary email matching the account's normalized email. Store the provider's stable user ID, not its mutable username.
+- **Password storage:** use Argon2id with parameters stored in the encoded password hash (`m=19 MiB`, `t=2`, `p=1` initially). Rehash on successful login if the configured parameters are raised later. Require 12–128 password bytes at signup.
+- **Dashboard sessions:** use random opaque browser session tokens in HttpOnly, SameSite=Lax cookies; enable Secure cookies over HTTPS. Store only a SHA-256 hash of each token in PostgreSQL, with expiry and revocation fields. The initial session lasts seven days and renews after active use.
+- **Verification tokens:** generate random one-time tokens, store only their SHA-256 hashes, and give them a 24-hour expiry.
+- **Password recovery:** send a one-time email reset link with a one-hour expiry. Store only its SHA-256 token hash; consume it, update the password, and revoke every active dashboard session in one tenant-scoped transaction. Return a generic response for reset requests so the endpoint does not disclose whether an email belongs to an account. Require a new login after reset.
+- **Email verification flow:** verification is required before password login. A valid verification link is confirmed by a POST from a simple confirmation page, then verifies the email and starts a dashboard session. Email delivery uses Resend; configure `RESEND_API_KEY` and `RESEND_FROM` to send verification and password-reset messages.
+- **GitHub first signup:** collect a workspace name for a new account before creating its tenant. Existing users can sign in without providing it. Create a tenant for a new verified GitHub identity, or link to an existing account only when GitHub's verified primary email matches its normalized email.
+- **Pre-auth lookup:** login, verification, password reset, GitHub identity, and session resolution use narrowly scoped `SECURITY DEFINER` database functions owned by a dedicated non-login role. The API role retains normal table permissions subject to tenant RLS and can execute these lookup functions; it has no `BYPASSRLS` privilege or membership in the lookup role. Keep function inputs parameterized and auth endpoints rate-limited.
+- **Auth rate limits:** the initial single-process API applies per-IP limits in memory. Replace them with shared Redis limits before running multiple API instances.
 
 - **Tenant server to our API:** secret API key in the `Authorization: Bearer` header. Keys look like `sk_test_...` / `sk_live_...`.
 - **Public keys** (`pk_test_...`) may be used for limited client-side actions.
@@ -175,9 +183,14 @@ REST, JSON, versioned under `/v1`. Idempotency keys supported on POST requests t
 | Method | Path | Purpose |
 | --- | --- | --- |
 | POST | `/v1/auth/signup` | Create a tenant and first dashboard user |
+| POST | `/v1/auth/resend-verification` | Resend an email verification link without disclosing account status |
+| GET/POST | `/v1/auth/verify-email` | Show confirmation and verify email; successful verification starts a session |
+| POST | `/v1/auth/password-reset/request` | Request a password reset without disclosing account status |
+| GET/POST | `/v1/auth/password-reset` | Show the reset form and replace the password; existing sessions are revoked |
 | POST | `/v1/auth/login` | Sign in with email and password |
 | POST | `/v1/auth/logout` | End the dashboard session |
-| GET | `/v1/auth/github` | Begin GitHub OAuth sign-in |
+| GET | `/v1/auth/me` | Return the current dashboard user and renew a near-expiry session |
+| GET | `/v1/auth/github?tenant_name=...` | Begin GitHub sign-in or signup |
 | GET | `/v1/auth/github/callback` | Complete GitHub OAuth sign-in |
 | POST | `/v1/projects` | Create a project within the tenant |
 | GET | `/v1/projects` | List the tenant's projects |
@@ -233,14 +246,18 @@ Per API key, enforced in Redis (token bucket). Limits are generous at MVP but mu
 
 | Table | Key fields |
 | --- | --- |
-| `tenants` | id, name, status, created_at |
-| `dashboard_users` | id, tenant_id, normalized email (unique), nullable password_hash, role |
-| `user_identities` | id, dashboard_user_id, provider (`github`), provider_subject (stable provider user ID; unique with provider), created_at |
+| `tenants` | id, name, status (`active`/`inactive`), last_login_at, created_at |
+| `dashboard_users` | id, tenant_id, email, normalized email (unique), nullable password_hash, email_verified_at, role, created_at, last_login_at |
+| `user_identities` | id, tenant_id, dashboard_user_id, provider (`github`), provider_subject (stable provider user ID; unique with provider), created_at |
+| `email_verification_tokens` | token_hash, tenant_id, dashboard_user_id, created_at, expires_at, consumed_at |
+| `password_reset_tokens` | token_hash, tenant_id, dashboard_user_id, created_at, expires_at, consumed_at |
 | `projects` | id, tenant_id, name, quotas (json) |
 | `api_keys` | id, project_id, prefix, key_hash, env (`test`/`live`), last_used_at, revoked_at |
 | `rooms` | id, project_id, public_name, livekit_room, mode, status, started_at, ended_at |
 | `sessions` | id, room_id, participant_identity, joined_at, left_at |
 | `usage_events` | id, project_id, room_id, type, quantity, unit, occurred_at |
+
+Dashboard sessions are cached in Redis by tenant and user, with a 48-hour idle TTL renewed after 24 hours. A new login replaces that user's previous session.
 | `wallets` | id, tenant_id, env, currency, balance (integer, minor units) |
 | `wallet_ledger` | id, wallet_id, type (`topup`/`usage`/`adjustment`), amount, reference, created_at |
 | `payments` | id, tenant_id, provider, provider_ref, amount, status, env |
@@ -251,6 +268,7 @@ Per API key, enforced in Redis (token bucket). Limits are generous at MVP but mu
 
 ### 7.2 Rules
 
+- Tenant status defaults to `active`; `last_login_at` is nullable until the first successful login. A later authentication/account-activity flow can update the login timestamp and apply the inactivity policy.
 - **Money is stored as integers** in minor units (kobo). Never floats.
 - **The ledger is append-only.** Wallet balance can always be recomputed from it.
 - Quality samples are high volume. Start in Postgres with time partitioning and a retention window (e.g. 30 days). Move to a time-series store only if needed.
@@ -463,8 +481,8 @@ The first platform milestone is complete when the core platform criteria pass. T
 2. Pricing: per-minute rates, minimum top-up, and what test mode allows.
 3. Product name and domain.
 4. Whether to also support Flutterwave later.
-5. Dashboard account linking and recovery behavior for email/password and GitHub OAuth.
-6. Account recovery and provider unlinking behavior.
+5. Provider unlinking behavior for email/password and GitHub OAuth.
+6. Password reset email provider configuration and delivery operations.
 
 **Risks**
 
@@ -487,3 +505,4 @@ The first platform milestone is complete when the core platform criteria pass. T
 - **Row-level security (RLS):** database rules that filter which rows a database role can read or change, even when a query does not include the tenant filter.
 - **Transaction-local tenant context:** the tenant ID attached to one database transaction so RLS can apply the right policy; it expires with that transaction and does not carry over to another pooled connection use.
 - **OAuth identity linking:** associating a user's account with a sign-in provider, such as GitHub, so either sign-in method reaches the same account.
+- **sqlc:** a code generator that reads our schema and SQL query files and writes typed Go methods; migrations and SQL remain the source we review and edit.

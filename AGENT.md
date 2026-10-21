@@ -83,3 +83,12 @@ for me to understand and explain; explain what changed and why after writing it.
 After each implementation, update `SOURCE_LOGS.md` with the files changed and a
 concise explanation of the logic written. Do not log documentation-only edits as
 code implementation.
+
+## 14. Comments in source code
+Every function, method, struct, and interface declaration in handwritten Go
+source must have a useful comment explaining its purpose. For every new or
+materially changed implementation, also document non-obvious behavior, security
+boundaries, invariants, and important trade-offs. Tests should state the behavior
+they protect and why that case matters. Prefer comments that explain intent over
+comments that merely restate the code. Do not hand-edit generated sqlc files;
+update their SQL or configuration source if generated documentation needs to change.

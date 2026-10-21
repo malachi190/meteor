@@ -8,19 +8,25 @@ import (
 	"os"
 	"time"
 
+	"meteor/internal/auth"
 	"meteor/internal/config"
 	"meteor/internal/database"
 	"meteor/internal/health"
 	"meteor/internal/httpapi"
 	"meteor/internal/logging"
+	"meteor/internal/repository"
+
+	"github.com/redis/go-redis/v9"
 )
 
+// main runs the API composition root and exits non-zero when startup or serving fails.
 func main() {
 	if err := run(); err != nil {
 		os.Exit(1)
 	}
 }
 
+// run loads configuration, verifies infrastructure connections, wires services, and serves HTTP.
 func run() (runErr error) {
 	cfg, configErr := config.Load()
 	if cfg.ErrorLogPath == "" {
@@ -57,8 +63,23 @@ func run() (runErr error) {
 	}
 	defer pool.Close()
 
-	service := health.NewService(database.NewHealthRepository(pool))
-	handler := httpapi.NewServer(service, logs)
+	redisOptions, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		return fmt.Errorf("parse REDIS_URL: %w", err)
+	}
+	redisClient := redis.NewClient(redisOptions)
+	defer redisClient.Close()
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("connect to Redis: %w", err)
+	}
+
+	service := health.NewService(repository.NewHealthRepository(pool))
+	authService := auth.NewService(repository.NewAuthRepository(pool), auth.NewRedisSessionStore(redisClient), auth.NewResendMailer(cfg), cfg.PublicBaseURL)
+	authService.ConfigureGitHub(auth.GitHubSettings{
+		ClientID: cfg.GitHubClientID, ClientSecret: cfg.GitHubClientSecret,
+		CallbackURL: cfg.GitHubCallbackURL, StateSecret: cfg.GitHubStateSecret,
+	})
+	handler := httpapi.NewServer(service, authService, logs, cfg.CookieSecure)
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,

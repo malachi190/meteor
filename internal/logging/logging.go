@@ -50,6 +50,7 @@ type dailyFile struct {
 	stopOnce sync.Once
 }
 
+// newDailyFile migrates legacy output, opens today's file, and starts midnight rotation.
 func newDailyFile(basePath string) (*dailyFile, error) {
 	if err := os.MkdirAll(filepath.Dir(basePath), 0o750); err != nil {
 		return nil, err
@@ -77,6 +78,7 @@ func newDailyFile(basePath string) (*dailyFile, error) {
 	return writer, nil
 }
 
+// Write appends log bytes to the current date's file, rotating lazily if the date changed.
 func (w *dailyFile) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -91,6 +93,7 @@ func (w *dailyFile) Write(p []byte) (int, error) {
 	return w.file.Write(p)
 }
 
+// rotateAtMidnight switches log files at local midnight until Close stops the worker.
 func (w *dailyFile) rotateAtMidnight() {
 	defer close(w.done)
 	for {
@@ -110,6 +113,7 @@ func (w *dailyFile) rotateAtMidnight() {
 	}
 }
 
+// rotateLocked opens the requested day's file and prunes files outside the retention window.
 func (w *dailyFile) rotateLocked(now time.Time) error {
 	day := now.Format(logDateLayout)
 	if day == w.day && w.file != nil {
@@ -129,6 +133,7 @@ func (w *dailyFile) rotateLocked(now time.Time) error {
 	return pruneOldFiles(w.basePath, now)
 }
 
+// Close stops rotation before closing the active file so writes cannot race shutdown.
 func (w *dailyFile) Close() error {
 	w.stopOnce.Do(func() { close(w.stop) })
 	<-w.done
@@ -143,12 +148,14 @@ func (w *dailyFile) Close() error {
 	return err
 }
 
+// datedPath inserts a calendar date before the configured log file extension.
 func datedPath(basePath, day string) string {
 	extension := filepath.Ext(basePath)
 	name := strings.TrimSuffix(filepath.Base(basePath), extension)
 	return filepath.Join(filepath.Dir(basePath), name+"-"+day+extension)
 }
 
+// migrateLegacyFile moves or appends an undated legacy log into its modification-date file.
 func migrateLegacyFile(basePath string, now time.Time) error {
 	info, err := os.Stat(basePath)
 	if os.IsNotExist(err) {
@@ -192,6 +199,7 @@ func migrateLegacyFile(basePath string, now time.Time) error {
 	return os.Remove(basePath)
 }
 
+// pruneOldFiles removes only matching dated logs older than the three-day retention period.
 func pruneOldFiles(basePath string, now time.Time) error {
 	dir := filepath.Dir(basePath)
 	entries, err := os.ReadDir(dir)
@@ -213,6 +221,7 @@ func pruneOldFiles(basePath string, now time.Time) error {
 	return nil
 }
 
+// datedFileDay parses a filename only when it matches this logger's dated naming pattern.
 func datedFileDay(basePath, filename string) (string, bool) {
 	extension := filepath.Ext(basePath)
 	baseName := strings.TrimSuffix(filepath.Base(basePath), extension)
@@ -225,6 +234,7 @@ func datedFileDay(basePath, filename string) (string, bool) {
 	return day, err == nil && parsed.Format(logDateLayout) == day
 }
 
+// olderThanRetention treats today and the prior two local calendar dates as retained.
 func olderThanRetention(day string, now time.Time) bool {
 	cutoff := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -2)
 	return day < cutoff.Format(logDateLayout)

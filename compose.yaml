@@ -15,5 +15,28 @@ services:
       timeout: 3s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    profiles: [tunnel]
+    command:
+      - http
+      - host.docker.internal:8080
+      - --url=${NGROK_DOMAIN:-}
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+
 volumes:
   postgres_data:
