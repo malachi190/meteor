@@ -120,3 +120,14 @@ This file records each implementation increment, the files changed, and what the
 - `internal/database/pool_test.go`: checks malformed database URL rejection and optionally verifies a live PostgreSQL connection through `TEST_DATABASE_URL`.
 - `internal/database/tenant_test.go`: verifies tenant database work fails closed when tenant context is missing, rejects a missing transaction callback, and optionally checks the transaction-local RLS setting against live PostgreSQL.
 - Live-service checks skip when their `TEST_*_URL` variable is unset, so the default unit suite does not require Docker. No GitHub OAuth network flow is covered; it is reserved for frontend integration testing.
+
+## 2026-10-21 — Shared auth rate limits and project API keys
+
+- `internal/httpapi/auth_rate_limit.go`: replaces per-process counters with one Redis Lua fixed-window counter per route and socket peer IP. SHA-256 key names avoid storing raw addresses in Redis; a Redis error returns 503 so auth limits cannot silently fail open.
+- `internal/httpapi/auth_rate_limit_test.go`: uses two limiter instances against the same Redis service to prove they share one quota while keeping different peer IPs separate.
+- `migrations/00009_create_project_api_keys.sql` and `db/queries/api_keys.sql`: add tenant-owned API keys with forced RLS, project foreign-key scope, test/live environment checks, visible prefixes, hashes, and revocation timestamps. `meteor_app` receives only the table operations needed by dashboard management.
+- `internal/project/service.go`: validates project names and IDs, generates 256-bit `sk_test_`/`sk_live_` secrets, returns the raw secret at creation only, and sends SHA-256 hashes to persistence.
+- `internal/repository/project_repository.go`: adds tenant-scoped API-key create/list/revoke operations; each verifies project ownership in the same RLS transaction and uses explicit tenant/project filters.
+- `internal/httpapi/project_handlers.go`, `server.go`, and `cmd/api/main.go`: expose authenticated project and key management routes and wire the service plus shared Redis limiter.
+- `internal/project/service_test.go` and `internal/repository/project_repository_test.go`: cover key hashing and input/conflict behavior, plus live tenant isolation, listing, and revocation. `internal/database/queries/` was regenerated with sqlc.
+- Validation: `sqlc generate`, regular `go test ./...`, and live Redis/PostgreSQL integration tests passed. Migration 9 was applied to the local Docker database. The dashboard UI remains to be built.

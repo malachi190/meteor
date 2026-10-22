@@ -14,6 +14,7 @@ import (
 	"meteor/internal/health"
 	"meteor/internal/httpapi"
 	"meteor/internal/logging"
+	"meteor/internal/project"
 	"meteor/internal/repository"
 
 	"github.com/redis/go-redis/v9"
@@ -79,7 +80,8 @@ func run() (runErr error) {
 		ClientID: cfg.GitHubClientID, ClientSecret: cfg.GitHubClientSecret,
 		CallbackURL: cfg.GitHubCallbackURL, StateSecret: cfg.GitHubStateSecret,
 	})
-	handler := httpapi.NewServer(service, authService, logs, cfg.CookieSecure)
+	projectService := project.NewService(repository.NewProjectRepository(pool))
+	handler := httpapi.NewServer(service, authService, projectService, redisClient, logs, cfg.CookieSecure)
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,

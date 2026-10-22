@@ -1,51 +1,57 @@
 package httpapi
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"math"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
+
+	"meteor/internal/logging"
 )
 
-// authRateLimiter tracks fixed-window request counts by route and client IP in one process.
+const authRateLimitPrefix = "meteor:rate_limit:auth:"
+
+var fixedWindowScript = redis.NewScript(`
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+`)
+
+// authRateLimiter stores fixed-window counters in shared Redis so API instances enforce one limit.
 type authRateLimiter struct {
-	mu        sync.Mutex
-	window    time.Duration
-	started   map[string]time.Time
-	requests  map[string]int
-	lastSweep time.Time
+	client redis.UniversalClient
+	window time.Duration
 }
 
-// newAuthRateLimiter creates an empty fixed-window limiter with the requested window size.
-func newAuthRateLimiter(window time.Duration) *authRateLimiter {
-	return &authRateLimiter{window: window, started: make(map[string]time.Time), requests: make(map[string]int)}
+// newAuthRateLimiter creates a Redis-backed fixed-window limiter.
+func newAuthRateLimiter(client redis.UniversalClient, window time.Duration) *authRateLimiter {
+	return &authRateLimiter{client: client, window: window}
 }
 
-// allow atomically checks and consumes one request slot for a route and remote address.
-func (l *authRateLimiter) allow(route string, r *http.Request, max int) bool {
-	key := route + ":" + clientIP(r.RemoteAddr)
-	now := time.Now()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if started, ok := l.started[key]; !ok || now.Sub(started) >= l.window {
-		l.started[key] = now
-		l.requests[key] = 0
+// allow atomically counts one request for a route and remote IP and reports whether it is within limit.
+func (l *authRateLimiter) allow(ctx context.Context, route string, r *http.Request, max int) (bool, error) {
+	if l.client == nil || l.window <= 0 || max <= 0 {
+		return false, errors.New("auth rate limiter is not configured")
 	}
-	if len(l.started) > 10000 && now.Sub(l.lastSweep) > l.window {
-		for existing, started := range l.started {
-			if now.Sub(started) >= l.window {
-				delete(l.started, existing)
-				delete(l.requests, existing)
-			}
-		}
-		l.lastSweep = now
+	identity := route + "\x00" + clientIP(r.RemoteAddr)
+	digest := sha256.Sum256([]byte(identity))
+	key := authRateLimitPrefix + hex.EncodeToString(digest[:])
+	windowSeconds := int64(math.Ceil(l.window.Seconds()))
+	count, err := fixedWindowScript.Run(ctx, l.client, []string{key}, windowSeconds).Int64()
+	if err != nil {
+		return false, err
 	}
-	if l.requests[key] >= max {
-		return false
-	}
-	l.requests[key]++
-	return true
+	return count <= int64(max), nil
 }
 
 // clientIP strips the port from RemoteAddr without trusting forwarded headers.
@@ -57,12 +63,18 @@ func clientIP(remoteAddress string) string {
 	return strings.TrimSpace(remoteAddress)
 }
 
-// allowAuthRequest writes a retryable 429 response when a route has exceeded its local limit.
-func allowAuthRequest(w http.ResponseWriter, r *http.Request, limiter *authRateLimiter, route string, max int) bool {
-	if limiter.allow(route, r, max) {
+// allowAuthRequest fails closed if Redis is unavailable and returns 429 after the shared limit is reached.
+func allowAuthRequest(w http.ResponseWriter, r *http.Request, limiter *authRateLimiter, logs *logging.Loggers, route string, max int) bool {
+	allowed, err := limiter.allow(r.Context(), route, r, max)
+	if err != nil {
+		logs.Errors.Error().Err(err).Str("route", route).Msg("shared auth rate limiter failed")
+		writeAuthError(w, http.StatusServiceUnavailable, "rate_limit_unavailable", "Authentication is temporarily unavailable. Try again shortly.")
+		return false
+	}
+	if allowed {
 		return true
 	}
-	w.Header().Set("Retry-After", "60")
+	w.Header().Set("Retry-After", strconv.FormatInt(int64(math.Ceil(limiter.window.Seconds())), 10))
 	writeAuthError(w, http.StatusTooManyRequests, "rate_limited", "Too many attempts. Try again shortly.")
 	return false
 }

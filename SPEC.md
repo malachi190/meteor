@@ -165,7 +165,7 @@ Tenant (company)
 - **Email verification flow:** verification is required before password login. A valid verification link is confirmed by a POST from a simple confirmation page, then verifies the email and starts a dashboard session. Email delivery uses Resend; configure `RESEND_API_KEY` and `RESEND_FROM` to send verification and password-reset messages.
 - **GitHub first signup:** collect a workspace name for a new account before creating its tenant. Existing users can sign in without providing it. Create a tenant for a new verified GitHub identity, or link to an existing account only when GitHub's verified primary email matches its normalized email.
 - **Pre-auth lookup:** login, verification, password reset, GitHub identity, and session resolution use narrowly scoped `SECURITY DEFINER` database functions owned by a dedicated non-login role. The API role retains normal table permissions subject to tenant RLS and can execute these lookup functions; it has no `BYPASSRLS` privilege or membership in the lookup role. Keep function inputs parameterized and auth endpoints rate-limited.
-- **Auth rate limits:** the initial single-process API applies per-IP limits in memory. Replace them with shared Redis limits before running multiple API instances.
+- **Auth rate limits:** shared Redis enforces per-IP, per-route fixed-window limits atomically across API instances. Auth endpoints fail closed with a temporary-unavailable response if Redis cannot enforce the limit. The API uses the socket peer address and does not trust forwarded IP headers unless a trusted-proxy policy is added.
 
 - **Tenant server to our API:** secret API key in the `Authorization: Bearer` header. Keys look like `sk_test_...` / `sk_live_...`.
 - **Public keys** (`pk_test_...`) may be used for limited client-side actions.
@@ -252,7 +252,7 @@ Per API key, enforced in Redis (token bucket). Limits are generous at MVP but mu
 | `email_verification_tokens` | token_hash, tenant_id, dashboard_user_id, created_at, expires_at, consumed_at |
 | `password_reset_tokens` | token_hash, tenant_id, dashboard_user_id, created_at, expires_at, consumed_at |
 | `projects` | id, tenant_id, name, quotas (json) |
-| `api_keys` | id, project_id, prefix, key_hash, env (`test`/`live`), last_used_at, revoked_at |
+| `api_keys` | id, tenant_id, project_id, prefix, key_hash, env (`test`/`live`), last_used_at, revoked_at |
 | `rooms` | id, project_id, public_name, livekit_room, mode, status, started_at, ended_at |
 | `sessions` | id, room_id, participant_identity, joined_at, left_at |
 | `usage_events` | id, project_id, room_id, type, quantity, unit, occurred_at |

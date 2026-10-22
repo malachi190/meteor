@@ -15,6 +15,7 @@ type Querier interface {
 	ConsumePasswordResetToken(ctx context.Context, arg ConsumePasswordResetTokenParams) (pgtype.UUID, error)
 	ConsumePriorEmailVerificationTokens(ctx context.Context, arg ConsumePriorEmailVerificationTokensParams) (int64, error)
 	ConsumePriorPasswordResetTokens(ctx context.Context, arg ConsumePriorPasswordResetTokensParams) (int64, error)
+	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	CreateDashboardUser(ctx context.Context, arg CreateDashboardUserParams) (CreateDashboardUserRow, error)
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) error
 	CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) error
@@ -24,6 +25,7 @@ type Querier interface {
 	CreateVerifiedGitHubUser(ctx context.Context, arg CreateVerifiedGitHubUserParams) (CreateVerifiedGitHubUserRow, error)
 	GetDashboardUserByTenantAndID(ctx context.Context, arg GetDashboardUserByTenantAndIDParams) (GetDashboardUserByTenantAndIDRow, error)
 	GetProjectByTenantAndID(ctx context.Context, arg GetProjectByTenantAndIDParams) (Project, error)
+	ListAPIKeysByTenantProject(ctx context.Context, arg ListAPIKeysByTenantProjectParams) ([]ListAPIKeysByTenantProjectRow, error)
 	ListProjectsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]Project, error)
 	ListUserIdentities(ctx context.Context, arg ListUserIdentitiesParams) ([]UserIdentity, error)
 	MarkDashboardUserEmailVerified(ctx context.Context, arg MarkDashboardUserEmailVerifiedParams) (MarkDashboardUserEmailVerifiedRow, error)
@@ -31,6 +33,7 @@ type Querier interface {
 	ResolveEmailVerificationToken(ctx context.Context, pTokenHash []byte) (ResolveEmailVerificationTokenRow, error)
 	ResolveGitHubIdentity(ctx context.Context, pProviderSubject string) (ResolveGitHubIdentityRow, error)
 	ResolvePasswordResetToken(ctx context.Context, pTokenHash []byte) (ResolvePasswordResetTokenRow, error)
+	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) (int64, error)
 	UpdateDashboardPassword(ctx context.Context, arg UpdateDashboardPasswordParams) (int64, error)
 	UpdateDashboardUserLastLogin(ctx context.Context, arg UpdateDashboardUserLastLoginParams) (int64, error)
 	UpdateTenantLastLogin(ctx context.Context, id pgtype.UUID) (int64, error)

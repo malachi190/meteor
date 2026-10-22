@@ -12,6 +12,8 @@ import (
 	"meteor/internal/auth"
 	"meteor/internal/logging"
 	"meteor/internal/tenant"
+
+	"github.com/redis/go-redis/v9"
 )
 
 const dashboardSessionCookie = "meteor_session"
@@ -32,10 +34,10 @@ type authErrorResponse struct {
 }
 
 // registerAuthRoutes installs public auth flows and session-protected account endpoints.
-func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, logs *logging.Loggers, cookieSecure bool) {
-	limiter := newAuthRateLimiter(time.Minute)
+func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, rateLimitClient redis.UniversalClient, logs *logging.Loggers, cookieSecure bool) {
+	limiter := newAuthRateLimiter(rateLimitClient, time.Minute)
 	mux.HandleFunc("GET /v1/auth/github", func(w http.ResponseWriter, r *http.Request) {
-		if !allowAuthRequest(w, r, limiter, "github_start", 10) {
+		if !allowAuthRequest(w, r, limiter, logs, "github_start", 10) {
 			return
 		}
 		authorizationURL, state, workspace, err := service.StartGitHub(r.URL.Query().Get("tenant_name"))
@@ -56,7 +58,7 @@ func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, logs *logging
 	})
 
 	mux.HandleFunc("GET /v1/auth/github/callback", func(w http.ResponseWriter, r *http.Request) {
-		if !allowAuthRequest(w, r, limiter, "github_callback", 20) {
+		if !allowAuthRequest(w, r, limiter, logs, "github_callback", 20) {
 			clearOAuthCookie(w, githubStateCookie, cookieSecure)
 			clearOAuthCookie(w, githubWorkspaceCookie, cookieSecure)
 			return
@@ -103,7 +105,7 @@ func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, logs *logging
 	})
 
 	mux.HandleFunc("POST /v1/auth/signup", func(w http.ResponseWriter, r *http.Request) {
-		if !allowAuthRequest(w, r, limiter, "signup", 5) {
+		if !allowAuthRequest(w, r, limiter, logs, "signup", 5) {
 			return
 		}
 		var request struct {
@@ -133,7 +135,7 @@ func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, logs *logging
 	})
 
 	mux.HandleFunc("POST /v1/auth/resend-verification", func(w http.ResponseWriter, r *http.Request) {
-		if !allowAuthRequest(w, r, limiter, "resend_verification", 3) {
+		if !allowAuthRequest(w, r, limiter, logs, "resend_verification", 3) {
 			return
 		}
 		var request struct {
@@ -157,7 +159,7 @@ func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, logs *logging
 	})
 
 	mux.HandleFunc("POST /v1/auth/password-reset/request", func(w http.ResponseWriter, r *http.Request) {
-		if !allowAuthRequest(w, r, limiter, "password_reset_request", 3) {
+		if !allowAuthRequest(w, r, limiter, logs, "password_reset_request", 3) {
 			return
 		}
 		var request struct {
@@ -181,7 +183,7 @@ func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, logs *logging
 	})
 
 	mux.HandleFunc("GET /v1/auth/password-reset", func(w http.ResponseWriter, r *http.Request) {
-		if !allowAuthRequest(w, r, limiter, "password_reset_page", 20) {
+		if !allowAuthRequest(w, r, limiter, logs, "password_reset_page", 20) {
 			return
 		}
 		token := r.URL.Query().Get("token")
@@ -198,7 +200,7 @@ func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, logs *logging
 	})
 
 	mux.HandleFunc("POST /v1/auth/password-reset", func(w http.ResponseWriter, r *http.Request) {
-		if !allowAuthRequest(w, r, limiter, "password_reset", 10) {
+		if !allowAuthRequest(w, r, limiter, logs, "password_reset", 10) {
 			return
 		}
 		isForm := strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded")
@@ -247,7 +249,7 @@ func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, logs *logging
 	})
 
 	mux.HandleFunc("POST /v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
-		if !allowAuthRequest(w, r, limiter, "login", 10) {
+		if !allowAuthRequest(w, r, limiter, logs, "login", 10) {
 			return
 		}
 		var request struct {
@@ -273,7 +275,7 @@ func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, logs *logging
 	})
 
 	mux.HandleFunc("GET /v1/auth/verify-email", func(w http.ResponseWriter, r *http.Request) {
-		if !allowAuthRequest(w, r, limiter, "verification_page", 20) {
+		if !allowAuthRequest(w, r, limiter, logs, "verification_page", 20) {
 			return
 		}
 		token := r.URL.Query().Get("token")
@@ -290,7 +292,7 @@ func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, logs *logging
 	})
 
 	mux.HandleFunc("POST /v1/auth/verify-email", func(w http.ResponseWriter, r *http.Request) {
-		if !allowAuthRequest(w, r, limiter, "verification", 10) {
+		if !allowAuthRequest(w, r, limiter, logs, "verification", 10) {
 			return
 		}
 		var token string

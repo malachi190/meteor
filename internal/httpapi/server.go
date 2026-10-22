@@ -10,6 +10,9 @@ import (
 	"meteor/internal/auth"
 	"meteor/internal/health"
 	"meteor/internal/logging"
+	"meteor/internal/project"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // healthResponse is the small JSON body returned by the database-backed health endpoint.
@@ -18,7 +21,7 @@ type healthResponse struct {
 }
 
 // NewServer builds the HTTP handler layer and applies request logging to its routes.
-func NewServer(service *health.Service, authService *auth.Service, logs *logging.Loggers, cookieSecure bool) http.Handler {
+func NewServer(service *health.Service, authService *auth.Service, projectService *project.Service, rateLimitClient redis.UniversalClient, logs *logging.Loggers, cookieSecure bool) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := service.Check(r.Context()); err != nil {
@@ -29,7 +32,8 @@ func NewServer(service *health.Service, authService *auth.Service, logs *logging
 
 		writeHealth(w, http.StatusOK, "ok", logs.Errors)
 	})
-	registerAuthRoutes(mux, authService, logs, cookieSecure)
+	registerAuthRoutes(mux, authService, rateLimitClient, logs, cookieSecure)
+	registerProjectRoutes(mux, projectService, authService, logs, cookieSecure)
 
 	return requestLogging(mux, logs)
 }

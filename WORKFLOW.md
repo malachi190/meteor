@@ -17,7 +17,7 @@ This is the milestone checklist for building Meteor from the agreed spec. We upd
 
 ## Phase 1 — API foundations and tenant-safe database access
 
-**Status: In progress**
+**Status: Complete**
 
 - [x] Add godotenv for optional local `.env` loading and a Koanf-backed typed config struct; load only required settings at startup and pass config from the composition root.
 - [x] Establish handler → service → repository boundaries and wire dependencies from the composition root.
@@ -25,9 +25,9 @@ This is the milestone checklist for building Meteor from the agreed spec. We upd
 - [x] Rotate error logs into date-named files and retain the latest three calendar days.
 - [x] Add a typed tenant ID to Go request context using a private context key.
 - [x] Add a transaction helper that reads the tenant ID from context and sets `app.tenant_id` transaction-locally.
-- [ ] Attach tenant context only from trusted authentication or tenant-resolution code; never trust a tenant ID supplied directly by a client.
-- [ ] Add the first tenant-scoped database operation with explicit tenant/project filters.
-- [ ] Confirm queries without tenant context fail closed and cross-tenant reads/writes are denied by RLS.
+- [x] Attach tenant context only from trusted authentication or tenant-resolution code; never trust a tenant ID supplied directly by a client.
+- [x] Add the first tenant-scoped database operation with explicit tenant/project filters.
+- [x] Confirm queries without tenant context fail closed and cross-tenant reads/writes are denied by RLS.
 
 **Goal achieved when:** configuration and logging are wired through clear service layers, and a tenant-authenticated request runs database work in a transaction with the correct tenant setting; missing or mismatched tenant scope cannot access another tenant's rows.
 
@@ -35,7 +35,7 @@ This is the milestone checklist for building Meteor from the agreed spec. We upd
 
 ## Phase 2 — SQL query layer and tenant onboarding
 
-**Status: In progress**
+**Status: Complete**
 
 - [x] Set up sqlc and keep hand-written SQL queries alongside generated Go query code.
 - [x] Add a constrained tenant status and nullable last-login timestamp through a new migration.
@@ -56,19 +56,19 @@ This is the milestone checklist for building Meteor from the agreed spec. We upd
 - [x] Add GitHub OAuth with state validation and verified primary-email checks.
 - [x] Link GitHub login to an existing account only when its verified email matches the normalized account email.
 - [x] Attach the authenticated tenant ID to dashboard request context through session middleware.
-- [x] Add basic per-process IP rate limits for signup, login, verification, and OAuth endpoints.
+- [x] Add shared Redis IP rate limits for signup, login, verification, and OAuth endpoints.
 - [x] Add one-time password reset links (one-hour expiry), with tenant-scoped atomic password update and revocation of all active sessions.
-- [ ] Replace per-process limits with shared Redis limits before running multiple API instances.
+- [x] Replace per-process limits with shared Redis limits before running multiple API instances.
 
 **Goal achieved when:** signup, login, logout, and GitHub sign-in resolve a verified dashboard identity and tenant scope without accepting tenant identity from an untrusted request field.
 
 ## Phase 4 — Self-serve projects and API keys
 
-**Status: Not started**
+**Status: In progress**
 
-- [ ] Add project create/list/detail operations, scoped to the signed-in tenant.
-- [ ] Create test/live API keys per project; show raw secrets once and store only hashes plus visible prefixes.
-- [ ] Add key listing and revocation.
+- [x] Add project create/list/detail operations, scoped to the signed-in tenant.
+- [x] Create test/live API keys per project; show raw secrets once and store only hashes plus visible prefixes.
+- [x] Add key listing and revocation.
 - [ ] Build the first basic tenant dashboard for signup, projects, and key management.
 
 **Goal achieved when:** a tenant can manage its own projects and keys in the dashboard, and cannot read or change another tenant's records.
@@ -124,7 +124,7 @@ This is the milestone checklist for building Meteor from the agreed spec. We upd
 **Status: Deferred until product validation**
 
 - [ ] Measure media bandwidth and call quality under realistic network conditions.
-- [ ] Evaluate Redis-backed rate limits and distributed LiveKit deployment.
+- [ ] Measure shared Redis rate limits across API instances and evaluate distributed LiveKit deployment.
 - [ ] Revisit OpenTelemetry tracing after baseline CLI request logs and file-based error logs are established.
 - [ ] Add regional media capacity, object storage, and deeper observability only when validated demand justifies the cost.
 - [ ] Load test progressively toward 100 and then 1,000 concurrent participants.
