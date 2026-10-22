@@ -121,7 +121,9 @@ Assuming \~0.5-1 Mbps per video stream:
 | Logging | Zerolog | CLI request logs and file-based error logs |
 | Tracing | OpenTelemetry later | Add distributed tracing after basic request/error logging is working |
 | Cache / pub-sub | Redis | Required by LiveKit distributed mode, also rate limiting |
-| Dashboard | Next.js + TypeScript | Familiar stack |
+| Dashboard | Next.js App Router + TypeScript + Tailwind CSS | Build a responsive, accessible dashboard while applying the separate Caldera design reference (`DESIGN.md`) rather than a component kit |
+| Dashboard API client | Axios with credentialed browser requests | Send the HttpOnly dashboard session cookie to the Go API; use an explicit CORS origin allowlist |
+| Dashboard components | Hand-built from `DESIGN.md` | Keep the interface consistent with the agreed product design; do not use shadcn/ui |
 | JS SDK | TypeScript, wrapping `livekit-client` | Adds our low-bandwidth, data meter and analytics features |
 | Payments | Provider interface (implementation later) | Keep payment-provider-specific behavior behind an adapter so services can be added or changed |
 | Local/dev | Docker Compose | One command to run everything |
@@ -160,6 +162,7 @@ Tenant (company)
 - **Dashboard users:** self-serve tenant signup and email/password authentication, with GitHub OAuth as an additional sign-in option. Password signups remain pending until the user verifies their email. Automatically link GitHub sign-in to an existing account only when GitHub provides a verified primary email matching the account's normalized email. Store the provider's stable user ID, not its mutable username.
 - **Password storage:** use Argon2id with parameters stored in the encoded password hash (`m=19 MiB`, `t=2`, `p=1` initially). Rehash on successful login if the configured parameters are raised later. Require 12–128 password bytes at signup.
 - **Dashboard sessions:** use random opaque browser session tokens in HttpOnly, SameSite=Lax cookies; enable Secure cookies over HTTPS. Store only a SHA-256 hash of each token in PostgreSQL, with expiry and revocation fields. The initial session lasts seven days and renews after active use.
+- **Dashboard browser API calls:** use Axios with credentials so the browser sends the HttpOnly session cookie. Configure the API with one exact `DASHBOARD_ORIGIN` allowlist and credentialed CORS responses; do not use `*` for credentialed requests.
 - **Verification tokens:** generate random one-time tokens, store only their SHA-256 hashes, and give them a 24-hour expiry.
 - **Password recovery:** send a one-time email reset link with a one-hour expiry. Store only its SHA-256 token hash; consume it, update the password, and revoke every active dashboard session in one tenant-scoped transaction. Return a generic response for reset requests so the endpoint does not disclose whether an email belongs to an account. Require a new login after reset.
 - **Email verification flow:** verification is required before password login. A valid verification link is confirmed by a POST from a simple confirmation page, then verifies the email and starts a dashboard session. Email delivery uses Resend; configure `RESEND_API_KEY` and `RESEND_FROM` to send verification and password-reset messages.

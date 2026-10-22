@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -12,9 +13,10 @@ import (
 )
 
 const (
-	defaultPort          = "8080"
-	defaultErrorLogPath  = "logs/meteor-errors.log"
-	defaultPublicBaseURL = "http://localhost:8080"
+	defaultPort            = "8080"
+	defaultErrorLogPath    = "logs/meteor-errors.log"
+	defaultPublicBaseURL   = "http://localhost:8080"
+	defaultDashboardOrigin = "http://localhost:3000"
 )
 
 // Config contains the settings the API needs after startup configuration is loaded.
@@ -24,6 +26,7 @@ type Config struct {
 	RedisURL           string `koanf:"redis_url"`
 	ErrorLogPath       string `koanf:"error_log_path"`
 	PublicBaseURL      string `koanf:"public_base_url"`
+	DashboardOrigin    string `koanf:"dashboard_origin"`
 	ResendAPIKey       string `koanf:"resend_api_key"`
 	ResendFrom         string `koanf:"resend_from"`
 	CookieSecure       bool   `koanf:"cookie_secure"`
@@ -37,7 +40,7 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		Port: defaultPort, ErrorLogPath: defaultErrorLogPath,
-		PublicBaseURL: defaultPublicBaseURL,
+		PublicBaseURL: defaultPublicBaseURL, DashboardOrigin: defaultDashboardOrigin,
 	}
 
 	if err := godotenv.Load(); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -48,9 +51,10 @@ func Load() (Config, error) {
 	k.Set("port", defaultPort)
 	k.Set("error_log_path", defaultErrorLogPath)
 	k.Set("public_base_url", defaultPublicBaseURL)
+	k.Set("dashboard_origin", defaultDashboardOrigin)
 	provider := env.Provider("", ".", func(key string) string {
 		switch strings.ToUpper(key) {
-		case "PORT", "DATABASE_URL", "REDIS_URL", "ERROR_LOG_PATH", "PUBLIC_BASE_URL", "RESEND_API_KEY", "RESEND_FROM", "COOKIE_SECURE", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_CALLBACK_URL", "GITHUB_STATE_SECRET":
+		case "PORT", "DATABASE_URL", "REDIS_URL", "ERROR_LOG_PATH", "PUBLIC_BASE_URL", "DASHBOARD_ORIGIN", "RESEND_API_KEY", "RESEND_FROM", "COOKIE_SECURE", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_CALLBACK_URL", "GITHUB_STATE_SECRET":
 			return strings.ToLower(key)
 		default:
 			return ""
@@ -83,8 +87,11 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.ErrorLogPath) == "" {
 		return errors.New("ERROR_LOG_PATH cannot be empty")
 	}
-	if strings.TrimSpace(c.PublicBaseURL) == "" {
-		return errors.New("PUBLIC_BASE_URL cannot be empty")
+	if err := validateOrigin("PUBLIC_BASE_URL", c.PublicBaseURL); err != nil {
+		return err
+	}
+	if err := validateDashboardOrigin(c.DashboardOrigin); err != nil {
+		return err
 	}
 	if (strings.TrimSpace(c.ResendAPIKey) == "") != (strings.TrimSpace(c.ResendFrom) == "") {
 		return errors.New("RESEND_API_KEY and RESEND_FROM must be configured together")
@@ -101,6 +108,20 @@ func (c Config) Validate() error {
 	}
 	if len(c.GitHubStateSecret) > 0 && len(c.GitHubStateSecret) < 32 {
 		return errors.New("GITHUB_STATE_SECRET must be at least 32 characters")
+	}
+	return nil
+}
+
+// validateDashboardOrigin requires one exact HTTP origin for credentialed dashboard requests.
+func validateDashboardOrigin(origin string) error {
+	return validateOrigin("DASHBOARD_ORIGIN", origin)
+}
+
+// validateOrigin requires an exact HTTP origin without a path, query, or fragment.
+func validateOrigin(name, origin string) error {
+	parsed, err := url.Parse(origin)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("%s must be an http(s) origin without a path, query, or fragment", name)
 	}
 	return nil
 }

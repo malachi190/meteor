@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  background: #e2e2df;
+  color: #070607;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+.font-display {
+  font-family: var(--font-bebas-neue), Impact, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #e2e2df;
+  color: #070607;
+  font-family: var(--font-dm-sans), Arial, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}

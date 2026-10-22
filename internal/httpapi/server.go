@@ -21,7 +21,7 @@ type healthResponse struct {
 }
 
 // NewServer builds the HTTP handler layer and applies request logging to its routes.
-func NewServer(service *health.Service, authService *auth.Service, projectService *project.Service, rateLimitClient redis.UniversalClient, logs *logging.Loggers, cookieSecure bool) http.Handler {
+func NewServer(service *health.Service, authService *auth.Service, projectService *project.Service, rateLimitClient redis.UniversalClient, dashboardOrigin, publicBaseURL string, logs *logging.Loggers, cookieSecure bool) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := service.Check(r.Context()); err != nil {
@@ -32,10 +32,10 @@ func NewServer(service *health.Service, authService *auth.Service, projectServic
 
 		writeHealth(w, http.StatusOK, "ok", logs.Errors)
 	})
-	registerAuthRoutes(mux, authService, rateLimitClient, logs, cookieSecure)
+	registerAuthRoutes(mux, authService, rateLimitClient, dashboardOrigin, logs, cookieSecure)
 	registerProjectRoutes(mux, projectService, authService, logs, cookieSecure)
 
-	return requestLogging(mux, logs)
+	return dashboardCORS(requestLogging(mux, logs), dashboardOrigin, publicBaseURL)
 }
 
 // writeHealth encodes the health status and logs failures while writing the response.

@@ -81,7 +81,7 @@ func run() (runErr error) {
 		CallbackURL: cfg.GitHubCallbackURL, StateSecret: cfg.GitHubStateSecret,
 	})
 	projectService := project.NewService(repository.NewProjectRepository(pool))
-	handler := httpapi.NewServer(service, authService, projectService, redisClient, logs, cfg.CookieSecure)
+	handler := httpapi.NewServer(service, authService, projectService, redisClient, cfg.DashboardOrigin, cfg.PublicBaseURL, logs, cfg.CookieSecure)
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,

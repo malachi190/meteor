@@ -93,7 +93,7 @@ type Service struct {
 	github     *githubProvider
 }
 
-// NewService wires auth dependencies and normalizes the public link base URL.
+// NewService wires auth dependencies and normalizes the public API origin used in email links.
 func NewService(repository Repository, sessions SessionStore, mailer VerificationMailer, publicBaseURL string) *Service {
 	return &Service{repository: repository, sessions: sessions, mailer: mailer, baseURL: strings.TrimRight(publicBaseURL, "/"), now: time.Now}
 }

@@ -3,9 +3,9 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"html"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -34,7 +34,7 @@ type authErrorResponse struct {
 }
 
 // registerAuthRoutes installs public auth flows and session-protected account endpoints.
-func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, rateLimitClient redis.UniversalClient, logs *logging.Loggers, cookieSecure bool) {
+func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, rateLimitClient redis.UniversalClient, dashboardOrigin string, logs *logging.Loggers, cookieSecure bool) {
 	limiter := newAuthRateLimiter(rateLimitClient, time.Minute)
 	mux.HandleFunc("GET /v1/auth/github", func(w http.ResponseWriter, r *http.Request) {
 		if !allowAuthRequest(w, r, limiter, logs, "github_start", 10) {
@@ -42,14 +42,14 @@ func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, rateLimitClie
 		}
 		authorizationURL, state, workspace, err := service.StartGitHub(r.URL.Query().Get("tenant_name"))
 		if errors.Is(err, auth.ErrInvalidInput) {
-			writeAuthError(w, http.StatusBadRequest, "workspace_required", "Provide a workspace name to continue with GitHub.")
+			redirectGitHubError(w, r, dashboardOrigin, "workspace_required")
 			return
 		}
 		if err != nil {
 			if !errors.Is(err, auth.ErrGitHubUnavailable) {
 				logs.Errors.Error().Err(err).Msg("start GitHub OAuth failed")
 			}
-			writeAuthError(w, http.StatusServiceUnavailable, "github_unavailable", "GitHub sign-in is unavailable.")
+			redirectGitHubError(w, r, dashboardOrigin, "github_unavailable")
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: githubStateCookie, Value: state, Path: "/v1/auth/github", MaxAge: 600, HttpOnly: true, Secure: cookieSecure, SameSite: http.SameSiteLaxMode})
@@ -74,34 +74,34 @@ func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, rateLimitClie
 		if workspaceErr == nil {
 			workspace = workspaceCookie.Value
 		}
-		account, token, expiresAt, err := service.GitHubCallback(r.Context(), r.URL.Query().Get("code"), r.URL.Query().Get("state"), state, workspace)
+		if r.URL.Query().Get("error") != "" {
+			redirectGitHubError(w, r, dashboardOrigin, "github_cancelled")
+			return
+		}
+		_, token, expiresAt, err := service.GitHubCallback(r.Context(), r.URL.Query().Get("code"), r.URL.Query().Get("state"), state, workspace)
 		if errors.Is(err, auth.ErrGitHubState) {
-			writeAuthError(w, http.StatusBadRequest, "github_state_invalid", "GitHub sign-in expired. Start again.")
+			redirectGitHubError(w, r, dashboardOrigin, "github_state_invalid")
 			return
 		}
 		if errors.Is(err, auth.ErrWorkspaceRequired) {
-			writeAuthError(w, http.StatusBadRequest, "workspace_required", "Provide a workspace name to finish creating a new tenant.")
+			redirectGitHubError(w, r, dashboardOrigin, "workspace_required")
 			return
 		}
 		if errors.Is(err, auth.ErrGitHubUnavailable) {
-			writeAuthError(w, http.StatusServiceUnavailable, "github_unavailable", "GitHub sign-in is unavailable.")
+			redirectGitHubError(w, r, dashboardOrigin, "github_unavailable")
 			return
 		}
 		if errors.Is(err, auth.ErrGitHubIdentity) {
-			writeAuthError(w, http.StatusForbidden, "verified_email_required", "GitHub must provide a verified primary email address.")
+			redirectGitHubError(w, r, dashboardOrigin, "verified_email_required")
 			return
 		}
 		if err != nil {
 			logs.Errors.Error().Err(err).Msg("GitHub OAuth callback failed")
-			writeAuthError(w, http.StatusBadGateway, "github_signin_failed", "Could not sign in with GitHub. Start again.")
+			redirectGitHubError(w, r, dashboardOrigin, "github_signin_failed")
 			return
 		}
 		setDashboardCookie(w, token, expiresAt, cookieSecure)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'")
-		_, _ = w.Write([]byte("<!doctype html><html><body><h1>Signed in</h1><p>Your Meteor dashboard session is ready. You can close this page.</p><p>" + html.EscapeString(account.Email) + "</p></body></html>"))
+		http.Redirect(w, r, strings.TrimRight(dashboardOrigin, "/")+"/workspace", http.StatusSeeOther)
 	})
 
 	mux.HandleFunc("POST /v1/auth/signup", func(w http.ResponseWriter, r *http.Request) {
@@ -191,12 +191,8 @@ func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, rateLimitClie
 			writeAuthError(w, http.StatusBadRequest, "invalid_password_reset", "Password reset link is invalid.")
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("<!doctype html><html><head><meta charset=\"utf-8\"><title>Reset Meteor password</title></head><body><h1>Choose a new password</h1><form method=\"post\" action=\"/v1/auth/password-reset\"><input type=\"hidden\" name=\"token\" value=\"" + html.EscapeString(token) + "\"><label>New password <input type=\"password\" name=\"password\" minlength=\"12\" maxlength=\"128\" required autocomplete=\"new-password\"></label><button type=\"submit\">Reset password</button></form></body></html>"))
+		redirectURL := strings.TrimRight(dashboardOrigin, "/") + "/reset-password?token=" + url.QueryEscape(token)
+		http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 	})
 
 	mux.HandleFunc("POST /v1/auth/password-reset", func(w http.ResponseWriter, r *http.Request) {
@@ -283,12 +279,8 @@ func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, rateLimitClie
 			writeAuthError(w, http.StatusBadRequest, "invalid_verification", "Verification link is invalid.")
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("<!doctype html><html><head><meta charset=\"utf-8\"><title>Verify Meteor account</title></head><body><h1>Verify your email</h1><form method=\"post\" action=\"/v1/auth/verify-email\"><input type=\"hidden\" name=\"token\" value=\"" + html.EscapeString(token) + "\"><button type=\"submit\">Verify email</button></form></body></html>"))
+		redirectURL := strings.TrimRight(dashboardOrigin, "/") + "/verify-email?token=" + url.QueryEscape(token)
+		http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 	})
 
 	mux.HandleFunc("POST /v1/auth/verify-email", func(w http.ResponseWriter, r *http.Request) {
@@ -351,6 +343,13 @@ func registerAuthRoutes(mux *http.ServeMux, service *auth.Service, rateLimitClie
 		clearDashboardCookie(w, cookieSecure)
 		w.WriteHeader(http.StatusNoContent)
 	})))
+}
+
+// redirectGitHubError returns OAuth failures to the dashboard using a fixed public error code.
+func redirectGitHubError(w http.ResponseWriter, r *http.Request, dashboardOrigin, code string) {
+	query := url.Values{"github_error": {code}}
+	location := strings.TrimRight(dashboardOrigin, "/") + "/login?" + query.Encode()
+	http.Redirect(w, r, location, http.StatusSeeOther)
 }
 
 // requireDashboardSession validates the cookie and attaches trusted account and tenant context.
