@@ -2,8 +2,16 @@
 
 :root {
   color-scheme: light;
-  background: #e2e2df;
-  color: #070607;
+  --meteor-ground: #e2e2df;
+  --meteor-frame: #eeede8;
+  --meteor-chrome: #f7f6f2;
+  --meteor-sheet: #fbfaf7;
+  --meteor-ink: #070607;
+  --meteor-muted: #555451;
+  --meteor-rule: #e5e4df;
+  --meteor-accent: #fc5000;
+  background: var(--meteor-ground);
+  color: var(--meteor-ink);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -23,8 +31,8 @@ body {
 
 body {
   margin: 0;
-  background: #e2e2df;
-  color: #070607;
+  background: var(--meteor-ground);
+  color: var(--meteor-ink);
   font-family: var(--font-dm-sans), Arial, sans-serif;
 }
 

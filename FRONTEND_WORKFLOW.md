@@ -18,10 +18,12 @@ This checklist guides the dashboard build in small, reviewable phases. A phase i
 
 **Repository layout:** the frontend lives under `dashboard/` at the repository root; existing backend directories stay in place.
 
+**Dashboard route scaffold:** /workspace is the signed-in homepage. The shared shell links to Projects, API keys, Profile, Settings, and documentation for Video, Audio, and Streaming. These routes are in place; sections marked Planned are entrypoints until their implementation phase.
+
 ## Planned dashboard screen map
 
 - **Authentication:** signup, sign-in, email verification, password reset, and GitHub sign-in.
-- **Dashboard home:** Codex will propose its content after the project, key, profile/settings, and API documentation work reveals which summary and next actions would be useful. Do not invent metrics.
+- **Dashboard home:** the navigation hub is in place. Any data-backed summary will follow after project, key, profile/settings, and API documentation work reveals which information is useful. Do not invent metrics.
 - **Projects and API keys:** tenant-scoped project list/detail/create and test/live key creation, one-time secret reveal, listing, and revocation.
 - **API documentation:** an in-dashboard documentation area organized into **Video**, **Audio**, and **Streaming**. Each area explains the relevant connection flow and provides practical integration instructions, code examples, API reference, authentication guidance, and errors.
 - **Profile:** the signed-in user's identity and workspace context, with editable fields only when the backend supports them.
@@ -48,12 +50,13 @@ The documentation is part of the product interface, not marketing content. The s
 **Status: In progress**
 
 - [x] Read `.agents/skills/design-taste-frontend/references/app-screens.md` before designing dashboard screens; follow its app-screen workflow, not its landing-page workflow.
-- [ ] Translate `DESIGN.md` into dashboard tokens for colors, typography, spacing, borders, radii, and interactive states.
+- [x] Map Caldera's core colors into dashboard tokens and keep the existing DM Sans/Bebas Neue font roles.
+- [ ] Finish shared tokens for spacing, borders, radii, and interactive states.
 - [x] Load DM Sans for interface text and Bebas Neue for the wordmark/display role.
-- [ ] Keep Caldera's warm Pumice/Limestone surfaces, Obsidian text, and restrained Ember accent; adapt typography and surface density for frequent use.
-- [ ] Build a product shell that identifies Meteor and the signed-in workspace, with navigation for the agreed product areas and account controls.
+- [x] Keep Caldera's warm Pumice/Limestone surfaces, Obsidian text, and restrained Ember accent; adapt typography and surface density for frequent use.
+- [x] Build a product shell that identifies Meteor and the signed-in workspace, with navigation for the agreed product areas and account controls.
 - [ ] Establish shared patterns for forms, tables/lists, documentation navigation, code samples, dialogs, notices, and status labels.
-- [ ] Define responsive behavior for desktop, tablet, and phone before screen-specific layouts spread.
+- [x] Define responsive behavior for the shell across desktop and narrow screens before screen-specific layouts spread.
 
 **Dashboard-specific design limits:** do not carry over a marketing hero, 189px display headline, decorative halftone hero, partner strip, or promotional conversion layout. Use the visual identity in service of work tasks and technical reading. Keep the interface flat and information-led; reserve shadows for floating UI such as menus and dialogs.
 
@@ -122,17 +125,18 @@ The documentation is part of the product interface, not marketing content. The s
 
 **Goal achieved when:** a developer can choose Video, Audio, or Streaming, understand the supported integration path, copy accurate examples, and distinguish shipped API behavior from roadmap items.
 
-## Phase 6 — Dashboard home (content proposal delegated to Codex)
+## Phase 6 — Dashboard home
 
-**Status: Deferred until the core dashboard areas clarify the most useful home-screen content**
+**Status: Navigation hub scaffold implemented early at the user's request; data-backed overview deferred until core areas clarify useful summaries**
 
-- [ ] Map the real project, key, account, and integration tasks to identify the home screen's main question.
+- [x] Provide homepage entrypoints to Projects, API keys, Profile, Settings, and Video/Audio/Streaming documentation.
+- [ ] Map the real project, key, account, and integration tasks to identify any useful data-backed home-screen summary.
 - [ ] Propose a useful first-run and returning-user layout using available data and links to the next action.
 - [ ] Identify the most frequent next action and place it directly on the screen.
 - [ ] Include only useful project, integration, or account information that can be computed from real data.
-- [ ] Review the proposal with the user before implementing the home screen.
+- [ ] Review the proposal with the user before implementing the data-backed overview.
 
-**Goal achieved when:** the proposed home screen has a clear purpose, uses available data honestly, and points to a useful next action. This phase does not block building the other agreed screens.
+**Goal achieved when:** the navigation hub is augmented with a reviewed overview that has a clear purpose, uses available data honestly, and points to a useful next action. The hub itself does not block building the other agreed screens.
 
 ## Phase 7 — Interaction, accessibility, and responsive review
 
